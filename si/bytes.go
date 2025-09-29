@@ -2,25 +2,49 @@ package si
 
 import (
 	"fmt"
-	"math/big"
 	"strconv"
 )
 
-var Prefixes = []string{"K", "M", "G", "T", "P", "E", "Z", "Y", "R", "Q"}
+const (
+	Byte = 1.0
+	Bits = 8.0
+)
 
-type Bytes struct {
-	f *big.Float
-}
+const (
+	Kilo   = 1000.0
+	Mega   = Kilo * Kilo
+	Giga   = Kilo * Mega
+	Tera   = Kilo * Giga
+	Peta   = Kilo * Tera
+	Exa    = Kilo * Peta
+	Yotta  = Kilo * Exa
+	Ronna  = Kilo * Yotta
+	Quetta = Kilo * Ronna
+)
 
-func NewBytes(v any) *Bytes {
+const (
+	Kibi  = 1024.0
+	Mebi  = Kibi * Kibi
+	Gibi  = Kibi * Mebi
+	Tebi  = Kibi * Gibi
+	Pebi  = Kibi * Tebi
+	Exbi  = Kibi * Pebi
+	Yobi  = Kibi * Exbi
+	Robi  = Kibi * Yobi
+	Quebi = Kibi * Robi
+)
+
+var Prefixes = []string{"", "K", "M", "G", "T", "P", "E", "Y", "R", "Q"}
+
+var Exponents10 = []float64{Byte, Kilo, Mega, Giga, Tera, Peta, Exa, Yotta, Ronna, Quetta}
+var Exponents2 = []float64{Byte, Kibi, Mebi, Gibi, Tebi, Pebi, Exbi, Yobi, Robi, Quebi}
+
+type Bytes float64
+
+func NewBytes(v any) Bytes {
 	switch v := v.(type) {
-	case *big.Float:
-		return &Bytes{f: v}
-	case *big.Int:
-		f64, _ := v.Float64()
-		return NewBytes(f64)
 	case float64:
-		return NewBytes(big.NewFloat(v))
+		return Bytes(v)
 	case int:
 		return NewBytes(float64(v))
 	case int16:
@@ -47,58 +71,80 @@ func NewBytes(v any) *Bytes {
 type FormatBase float64
 
 var (
-	Base10 FormatBase = 1000.0
-	Base2  FormatBase = 1024.0
+	Base10 FormatBase = Kilo
+	Base2  FormatBase = Kibi
 )
 
-type FormatUnit string
-
-var (
-	UnitBytes FormatUnit = "B"
-	UnitBit   FormatUnit = "b"
-)
-
-func (b *Bytes) FormatBase(base FormatBase, suffix FormatUnit) (float64, string) {
-	base_ := float64(base)
-	suffix_ := string(suffix)
-	if base == Base2 {
-		suffix_ = "i" + suffix_
+func (f FormatBase) String() string {
+	switch f {
+	case Kilo:
+		return ""
+	case Kibi:
+		return "i"
 	}
-	v := b.f
-	if v.Cmp(big.NewFloat(base_)) < 0 {
-		f, _ := v.Float64()
-		return f, suffix_
-	}
-	for _, c := range Prefixes {
-		v = v.Quo(v, big.NewFloat(base_))
-		if v.Cmp(big.NewFloat(base_)) < 0 {
-			f, _ := v.Float64()
-			return f, c + suffix_
-		}
-	}
-	f, _ := v.Float64()
-	return f, Prefixes[len(Prefixes)-1] + suffix_
+	panic("invalid FormatBase")
 }
 
-func (b *Bytes) Format(s fmt.State, format rune) {
-	val, suffix := b.FormatBase(Base10, UnitBytes)
+type FormatUnit float64
+
+var (
+	UnitBytes FormatUnit = Byte
+	UnitBits  FormatUnit = Bits
+)
+
+func (f FormatUnit) String() string {
+	switch f {
+	case Byte:
+		return "B"
+	case Bits:
+		return "b"
+	}
+	panic("invalid FormatUnit")
+}
+
+func convertClosest(v float64, exponents []float64) (float64, string) {
+	for i, exp := range exponents {
+		if v < exp {
+			return v / exponents[i-1], Prefixes[i-1]
+		}
+	}
+	return v / exponents[len(exponents)-1], Prefixes[len(Prefixes)-1]
+}
+
+func (b Bytes) FormatBase(base FormatBase, unit FormatUnit) (float64, string) {
+	exponents := Exponents10
+	if base == Base2 {
+		exponents = Exponents2
+	}
+	v, suffix := convertClosest(float64(b)*float64(unit), exponents)
+	return v, suffix + base.String() + unit.String()
+}
+
+func (b Bytes) Format(s fmt.State, format rune) {
+	base := Base10
+	unit := UnitBytes
 	var frmt string
-	for _, f := range "-=# @" {
+	for _, f := range "-+ 0" {
 		if s.Flag(int(f)) {
 			frmt += string(f)
 		}
 	}
+	if s.Flag(int('#')) {
+		unit = UnitBits
+	}
 	if w, ok := s.Width(); ok {
-		frmt += strconv.Itoa(w)
+		if w == 2 {
+			base = Base2
+		}
 	}
 	if p, ok := s.Precision(); ok {
 		frmt += "." + strconv.Itoa(p)
 	}
 	frmt += string(format)
+	val, suffix := b.FormatBase(base, unit)
 	fmt.Fprintf(s, fmt.Sprintf("%%%s %%s", frmt), val, suffix)
 }
 
-func (b *Bytes) String() string {
-	val, suffix := b.FormatBase(Base10, UnitBytes)
-	return fmt.Sprintf("%.2f %s", val, suffix)
+func (b Bytes) String() string {
+	return fmt.Sprintf("%.2f", b)
 }
